@@ -110,15 +110,15 @@ def extraer_codigo_destino(lineas):
     return [codigo_concatenado] if codigo_concatenado else [], destino_texto
 
 def detectar_estructura(texto):
-    if '¡Yapeaste!' in texto:
+    if '¡Enviaste con Plin!' in texto:
         return 1
-    elif '¡Te Yapearon!' in texto:
+    elif '¡Recibiste con Plin!' in texto:
         return 2
     return 0
 
 def validar_estructura_1(texto, codigo_detectado=None, destino_detectado=None):
     resultado = {
-        "estructura": "¡Yapeaste!",
+        "estructura": "¡Enviaste con Plin!",
         "monto": None,
         "receptor": None,
         "fecha": None,
@@ -191,7 +191,7 @@ def validar_estructura_1(texto, codigo_detectado=None, destino_detectado=None):
         else:
             advertencias.append("Mes no reconocido")
         lineas = texto.splitlines()
-        campos_fijos = ['Nro. de operación', 'Destino', 'DATOS DE LA TRANSACCIÓN', 'Yape']
+        campos_fijos = ['Nro. de operación', 'Destino', 'DATOS DE LA TRANSACCIÓN', 'Plin']
         for i, linea in enumerate(lineas):
             if all(p in linea for p in [dia, mes_str, anio]):
                 if i + 1 < len(lineas):
@@ -221,7 +221,7 @@ def validar_estructura_1(texto, codigo_detectado=None, destino_detectado=None):
 
 def validar_estructura_2(texto, codigo_detectado=None, destino_detectado=None):
     resultado = {
-        "estructura": "¡Te Yapearon!",
+        "estructura": "¡Recibiste con Plin!",
         "monto": None,
         "receptor": None,
         "fecha": None,
@@ -306,7 +306,7 @@ def validar_estructura_2(texto, codigo_detectado=None, destino_detectado=None):
                 advertencias.append("Fecha inválida (no existe en el calendario).")
         else:
             advertencias.append("Mes no reconocido")
-        campos_fijos = ['Nro. de operación', 'Destino', 'DATOS DE LA TRANSACCIÓN', 'Yape']
+        campos_fijos = ['Nro. de operación', 'Destino', 'DATOS DE LA TRANSACCIÓN', 'Plin']
         for i, linea in enumerate(lineas):
             if all(p in linea for p in [dia, mes_str, anio]):
                 if i + 1 < len(lineas):

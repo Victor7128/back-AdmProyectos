@@ -1,2 +1,2 @@
 # Backend web con PYTHON + FASTAPI
-Hecho para el curso de Inteligencia artificial, con conexión a una BD en MongoBD Atlas
+Hecho para el curso de Inteligencia artificial, con conexión a una BD en MongoBD Atlas. Este backend procesa y valida transacciones de Plin (Interbank).

@@ -1,8 +1,8 @@
-# main interbank
+# main interbank - Plin
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from login import router as auth_router
-from filtros.filtro_yape import router as yape_router
+from filtros.filtro_plin import router as plin_router
 from filtros.filtro_pixeles import router as pixeles_router
 from filtros.filtro_exif import router as exif_router
 from filtros.filtro_ruido import router as ruido_router
@@ -22,7 +22,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
-app.include_router(yape_router)
+app.include_router(plin_router)
 app.include_router(pixeles_router)
 app.include_router(exif_router)
 app.include_router(ruido_router)
