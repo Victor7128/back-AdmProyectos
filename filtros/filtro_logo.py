@@ -7,8 +7,8 @@ from fastapi import APIRouter, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
-plantilla1 = "./filtros/plantillas/yape.jpg"
-plantilla2 = "./filtros/plantillas/yape2.jpg"
+plantilla1 = "./filtros/plantillas/plin.jpg"
+plantilla2 = "./filtros/plantillas/plin2.jpg"
 logo_path = "./filtros/Logo.jpg"
 
 def detectar_cuadro_blanco(imagen):

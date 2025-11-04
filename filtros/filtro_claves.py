@@ -8,7 +8,9 @@ from fastapi import APIRouter, File, UploadFile, HTTPException
 router = APIRouter()
 
 PLANTILLA1 = [
-    {"WordText": "Yapeaste!", "Left": 85, "Top": 313},
+    {"WordText": "¡Enviaste", "Left": 85, "Top": 313},
+    {"WordText": "con", "Left": 195, "Top": 313},
+    {"WordText": "Plin!", "Left": 240, "Top": 313},
     {"WordText": "S/", "Left": 73, "Top": 380},
     {"WordText": "CÖDIGO", "Left": 73, "Top": 639},
     {"WordText": "SEGURIDAD", "Left": 199, "Top": 643},
@@ -20,8 +22,9 @@ PLANTILLA1 = [
 ]
 
 PLANTILLA2 = [
-    {"WordText": "iTe", "Left": 103, "Top": 426},
-    {"WordText": "Yapearon!", "Left": 199, "Top": 426},
+    {"WordText": "¡Recibiste", "Left": 103, "Top": 426},
+    {"WordText": "con", "Left": 245, "Top": 426},
+    {"WordText": "Plin!", "Left": 295, "Top": 426},
     {"WordText": "Sl", "Left": 101, "Top": 542},
     {"WordText": "CÖDIGO", "Left": 100, "Top": 896},
     {"WordText": "SEGURIDAD", "Left": 305, "Top": 904},
