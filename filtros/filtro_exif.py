@@ -8,7 +8,6 @@ import piexif
 router = APIRouter()
 
 def _convert_gps_to_decimal(coord, ref):
-    """Convierte coordenadas GPS EXIF a grados decimales"""
     try:
         d, m, s = coord
         decimal = d[0] / d[1] + (m[0] / m[1]) / 60 + (s[0] / s[1]) / 3600
@@ -21,8 +20,6 @@ def _convert_gps_to_decimal(coord, ref):
 def extraer_exif(imagen_bytes: bytes):
     try:
         imagen = Image.open(io.BytesIO(imagen_bytes))
-        
-        # Información básica de la imagen
         info_basica = {
             "format": imagen.format,
             "mode": imagen.mode,
@@ -30,14 +27,11 @@ def extraer_exif(imagen_bytes: bytes):
             "width": imagen.width,
             "height": imagen.height
         }
-        
-        # Intentar extraer EXIF con PIL primero (más compatible)
         exif_data = imagen.getexif()
         datos_utiles = {}
         sospechoso = False
         
         if exif_data:
-            # Usar PIL para extraer datos básicos
             for tag_id, value in exif_data.items():
                 tag = TAGS.get(tag_id, tag_id)
                 if isinstance(value, bytes):
@@ -46,8 +40,6 @@ def extraer_exif(imagen_bytes: bytes):
                     except:
                         value = str(value)
                 datos_utiles[tag] = value
-            
-            # Detección de edición
             software = str(datos_utiles.get("Software", "")).lower()
             processing_software = str(datos_utiles.get("ProcessingSoftware", "")).lower()
             
@@ -56,8 +48,6 @@ def extraer_exif(imagen_bytes: bytes):
                 "screenshot", "capture", "paint", "editor"
             ]):
                 sospechoso = True
-        
-        # Si PIL no encuentra EXIF, intentar con piexif
         if not datos_utiles:
             try:
                 exif_raw = imagen.info.get('exif')
@@ -81,7 +71,6 @@ def extraer_exif(imagen_bytes: bytes):
                                         valor = valor.decode(errors="ignore")
                                     datos_utiles[campo] = valor
 
-                    # Procesar coordenadas GPS
                     if "GPSLatitude" in datos_utiles and "GPSLongitude" in datos_utiles:
                         lat = _convert_gps_to_decimal(
                             datos_utiles["GPSLatitude"], 
@@ -93,13 +82,10 @@ def extraer_exif(imagen_bytes: bytes):
                         )
                         if lat is not None and lon is not None:
                             datos_utiles["GPS"] = {"latitud": lat, "longitud": lon}
-                        # Limpiar campos GPS individuales
                         for gps_field in ["GPSLatitude", "GPSLatitudeRef", "GPSLongitude", "GPSLongitudeRef"]:
                             datos_utiles.pop(gps_field, None)
             except Exception as e:
                 print(f"Error con piexif: {e}")
-
-        # Solo mostrar advertencia si el formato NO es JPEG/JPG o PNG
         formato = (info_basica.get("format") or "").lower()
         if formato not in ["jpeg", "jpg", "png"]:
             advertencia_formato = "Sospechoso"
