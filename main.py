@@ -10,6 +10,7 @@ from filtros.filtro_histograma import router as histograma_router
 from filtros.filtro_claves import router as claves_router
 from filtros.filtro_logo import router as logo_router
 from filtros.filtro_ocr import router as ocr_router
+from filtros.filtro_validarplin import router as validarplin_router
 
 app = FastAPI()
 
@@ -30,3 +31,4 @@ app.include_router(histograma_router)
 app.include_router(claves_router)
 app.include_router(logo_router)
 app.include_router(ocr_router)
+app.include_router(validarplin_router)
