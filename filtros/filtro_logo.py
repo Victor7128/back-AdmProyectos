@@ -10,7 +10,7 @@ from enum import Enum
 router = APIRouter()
 
 LOGO_PLIN_PATH = "./filtros/logo.jpg"
-PLANTILLAS_DIR = "./filtros/plantillas/plin.jpg"
+PLANTILLAS_DIR = "./filtros/plantillas"
 
 class TipoLogo(str, Enum):
     PLIN = "plin"
@@ -184,13 +184,26 @@ def calcular_porcentaje_cambio(
     return float('inf'), {}
 
 def obtener_plantillas_plin() -> List[str]:
+    """
+    Busca plantillas en el directorio y maneja errores
+    """
     if not os.path.exists(PLANTILLAS_DIR):
-        return []    
+        print(f"⚠️  Directorio no existe: {PLANTILLAS_DIR}")
+        return []
+    
+    if not os.path.isdir(PLANTILLAS_DIR):
+        print(f"⚠️  La ruta no es un directorio: {PLANTILLAS_DIR}")
+        return []
+    
     extensiones = ['*.jpg', '*.jpeg', '*.png', '*.bmp']
     plantillas = []    
     import glob
+    
     for ext in extensiones:
-        plantillas.extend(glob.glob(os.path.join(PLANTILLAS_DIR, ext)))    
+        patron = os.path.join(PLANTILLAS_DIR, ext)
+        encontradas = glob.glob(patron)
+        plantillas.extend(encontradas)
+    
     return plantillas
 
 def clasificar_autenticidad(porcentaje_cambio: float) -> str:
@@ -232,7 +245,8 @@ async def filtro_logo(
         if not plantillas:
             raise HTTPException(
                 status_code=500,
-                detail=f"❌ No se encontraron plantillas en: {PLANTILLAS_DIR}"
+                detail=f"❌ No se encontraron plantillas en el directorio: {PLANTILLAS_DIR}. "
+                       f"Verifica que la carpeta exista y contenga imágenes (jpg, png, bmp)."
             )
         content = await file.read()
         
@@ -261,6 +275,7 @@ async def filtro_logo(
         )
         imagen, cuadro_blanco_box = detectar_cuadro_blanco(imagen)
         imagen, borde_recibo = remarcar_contorno_recibo(imagen)
+        
         if not cuadro_blanco_box:
             raise HTTPException(
                 status_code=422,
@@ -290,6 +305,7 @@ async def filtro_logo(
                 })
         
         if not resultados_logos:
+            # ✅ Formato compatible con frontend cuando NO hay logo
             return JSONResponse(
                 content={
                     "logo_detectado": False,
@@ -328,7 +344,7 @@ async def filtro_logo(
                     comparaciones.append({
                         "plantilla": os.path.basename(plantilla_path),
                         "porcentaje_cambio": round(porcentaje, 2),
-                        "detalles_comparacion": detalles
+                        "detalles": detalles  # ✅ Cambiado de "detalles_comparacion" a "detalles"
                     })
         
         if not comparaciones:
@@ -342,6 +358,7 @@ async def filtro_logo(
         advertencia = clasificar_autenticidad(porcentaje_minimo)
         es_valido = advertencia == "Auténtico"
         
+        # ✅ Respuesta compatible con frontend
         return JSONResponse(
             content={
                 "logo_detectado": True,
@@ -350,7 +367,7 @@ async def filtro_logo(
                 "confianza_deteccion": mejor_logo["confianza"],
                 "porcentaje_cambio_minimo": porcentaje_minimo,
                 "advertencia": advertencia,
-                "mejor_coincidencia": mejor_coincidencia,
+                "mejor_coincidencia": mejor_coincidencia,  # ✅ Incluye "detalles" en lugar de "detalles_comparacion"
                 "todas_las_comparaciones": comparaciones[:3],
                 "total_plantillas_analizadas": len(comparaciones),
                 "mensaje": f"{'✅' if es_valido else '⚠️'} Recibo clasificado como: {advertencia}",

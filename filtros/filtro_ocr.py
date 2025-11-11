@@ -1,16 +1,14 @@
-# Filtro OCR para validación de comprobantes Plin
+# Filtro OCR optimizado para estructura REAL de comprobantes Plin
 import cv2
 import numpy as np
 import re
 import requests
-import os
 from datetime import datetime
 from fastapi import APIRouter, File, UploadFile, HTTPException
-from typing import Optional, List, Tuple, Dict
 
 router = APIRouter()
 
-API_KEY = os.getenv('OCR_API_KEY', 'e0b0a3ad7d88957')
+API_KEY = 'e0b0a3ad7d88957'
 OCR_API_URL = 'https://api.ocr.space/parse/image'
 
 DESTINOS_VALIDOS = [
@@ -20,22 +18,8 @@ DESTINOS_VALIDOS = [
     'Caja Tacna', 'Caja Metropolitana', 'Banco Pichincha'
 ]
 
-MESES = {
-    'ene': 1, 'enero': 1,
-    'feb': 2, 'febrero': 2,
-    'mar': 3, 'marzo': 3,
-    'abr': 4, 'abril': 4,
-    'may': 5, 'mayo': 5,
-    'jun': 6, 'junio': 6,
-    'jul': 7, 'julio': 7,
-    'ago': 8, 'agosto': 8,
-    'sep': 9, 'sept': 9, 'septiembre': 9,
-    'oct': 10, 'octubre': 10,
-    'nov': 11, 'noviembre': 11,
-    'dic': 12, 'diciembre': 12
-}
-
-def enviar_imagen_ocr_bytes(imagen_bytes) -> Tuple[Optional[str], List]:
+def enviar_imagen_ocr_bytes(imagen_bytes):
+    """Envía la imagen al servicio OCR externo"""
     try:
         response = requests.post(
             OCR_API_URL,
@@ -44,342 +28,299 @@ def enviar_imagen_ocr_bytes(imagen_bytes) -> Tuple[Optional[str], List]:
                 'apikey': API_KEY,
                 'language': 'spa',
                 'OCREngine': '2',
-                'isOverlayRequired': True,
-                'scale': True,
-                'detectOrientation': True
+                'isOverlayRequired': True
             },
             timeout=30
         )
     except requests.Timeout:
         raise HTTPException(
-            status_code=504,
+            status_code=504, 
             detail="❌ El OCR externo tardó demasiado (timeout)."
         )
     except Exception as e:
         raise HTTPException(
-            status_code=500,
+            status_code=500, 
             detail=f"❌ Error llamando al OCR externo: {str(e)}"
         )
     
     if response.status_code != 200:
         raise HTTPException(
-            status_code=502,
-            detail=f"❌ OCR externo respondió con código: {response.status_code}"
+            status_code=502, 
+            detail=f"❌ OCR externo respondió mal: {response.status_code}"
         )
     
-    try:
-        resultado = response.json()
-    except ValueError:
-        raise HTTPException(
-            status_code=502,
-            detail="❌ Respuesta inválida del OCR externo"
-        )
+    resultado = response.json()
     
     if resultado.get("IsErroredOnProcessing"):
-        error_msg = resultado.get("ParsedResults", [{}])[0].get("ErrorMessage", "Error desconocido")
-        raise HTTPException(
-            status_code=422,
-            detail=f"❌ Error en el procesamiento OCR: {error_msg}"
-        )
+        return None, []
     
     if not resultado.get('ParsedResults'):
-        raise HTTPException(
-            status_code=422,
-            detail="❌ No se pudieron obtener resultados del OCR"
-        )
+        return None, []
     
     parsed_result = resultado['ParsedResults'][0]
-    texto = parsed_result.get('ParsedText', '').strip()
-    lineas = parsed_result.get('Overlay', {}).get('Lines', [])
     
-    return texto, lineas
+    # Extraer overlay correctamente según estructura real
+    overlay = parsed_result.get('Overlay', {})
+    lineas = overlay.get('Lines', [])
+    
+    return (
+        parsed_result.get('ParsedText', '').strip(), 
+        lineas
+    )
 
-def recortar_cuadro_blanco_np(image_np: np.ndarray) -> Optional[np.ndarray]:
+def recortar_cuadro_blanco_np(image_np):
+    """Recorta el cuadro blanco del comprobante para mejor detección"""
     if image_np is None or image_np.size == 0:
         return None
     
     gris = cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY)
-    
     _, binaria = cv2.threshold(gris, 240, 255, cv2.THRESH_BINARY)
-    
     contornos, _ = cv2.findContours(binaria, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     if not contornos:
         return None
+    
     contorno_mayor = max(contornos, key=cv2.contourArea)
     x, y, w, h = cv2.boundingRect(contorno_mayor)
+    
     if w < 100 or h < 100:
         return None
     
     recorte = image_np[y:y + h, x:x + w]
     return recorte
 
-def detectar_estructura(texto: str) -> int:
+def extraer_destino_texto(texto):
+    """
+    Extrae el destino directamente del texto
+    Busca la línea siguiente a "Destino:"
+    """
+    lineas = texto.split('\n')
+    
+    for i, linea in enumerate(lineas):
+        # Buscar "Destino:" (case insensitive)
+        if 'destino' in linea.lower() and ':' in linea:
+            # Verificar línea siguiente
+            if i + 1 < len(lineas):
+                posible_destino = lineas[i + 1].strip()
+                
+                # Verificar que esté en la lista de destinos válidos
+                if posible_destino in DESTINOS_VALIDOS:
+                    return posible_destino
+                
+                # Verificar case-insensitive
+                for destino_valido in DESTINOS_VALIDOS:
+                    if posible_destino.lower() == destino_valido.lower():
+                        return destino_valido
+    
+    return None
+
+def detectar_estructura(texto):
+    """
+    Detecta el tipo de transacción Plin basado en estructura REAL
+    
+    Retorna:
+        1: Envío (¡Pago exitoso! / Enviado a:)
+        0: No es un comprobante Plin válido
+    """
     texto_lower = texto.lower()
     
+    # Estructura 1: Envío
     if any(patron in texto_lower for patron in [
-        'enviaste con plin',
-        'pago exitoso',
         '¡pago exitoso!',
+        'pago exitoso',
         'enviado a:'
     ]):
         return 1
     
-    if any(patron in texto_lower for patron in [
-        'recibiste con plin',
-        'recibido de:'
-    ]):
-        return 2
-    
     return 0
 
-def extraer_monto(texto: str) -> Tuple[Optional[float], List[str]]:
+def validar_estructura_plin(texto):
+    """
+    Valida comprobante Plin basado en estructura REAL
+    """
+    resultado = {
+        "tipo_transaccion": "Envío",
+        "monto": None,
+        "receptor": None,
+        "telefono": None,
+        "fecha": None,
+        "hora": None,
+        "destino": None,
+        "comision": None,
+        "codigo_operacion": None,
+        "comentario": None
+    }
     advertencias = []
-    match_monto = re.search(r'S/\s*(\d{1,6}(?:\.\d{2})?)', texto)
+    
+    # 1. Extraer monto (CASE INSENSITIVE: s/ o S/)
+    match_monto = re.search(r'[sS]/\s*(\d+(?:[.,]\d{2})?)', texto)
     
     if match_monto:
         try:
             monto_str = match_monto.group(1)
+            # Reemplazar coma por punto si existe
+            monto_str = monto_str.replace(',', '.')
             monto = float(monto_str)
+            resultado["monto"] = monto
             
             if monto <= 0:
                 advertencias.append("❌ Monto debe ser mayor a 0")
-                return None, advertencias
             elif monto > 500:
                 advertencias.append("⚠️ Monto muy alto (mayor a S/ 500)")
-            
-            return monto, advertencias
         except ValueError:
             advertencias.append("❌ Error al convertir el monto")
-            return None, advertencias
-
-    match_alt = re.search(r'\b(\d{1,6}(?:\.\d{2})?)\b', texto)
-    if match_alt:
-        try:
-            monto = float(match_alt.group(1))
-            if 0 < monto <= 2000:
-                advertencias.append("⚠️ Monto encontrado sin símbolo S/")
-                return monto, advertencias
-        except ValueError:
-            pass
+    else:
+        advertencias.append("❌ Monto no detectado")
     
-    advertencias.append("❌ Monto no detectado")
-    return None, advertencias
-
-def extraer_fecha_hora(texto: str) -> Tuple[Optional[str], Optional[str], List[str]]:
-    advertencias = []
-    match = re.search(
-        r'(\d{1,2})\s+([a-zA-ZáéíóúñÑ]{3,10})\.?\s+(\d{4})\s+(\d{1,2}:\d{2}\s*[APap][Mm])',
-        texto
-    )
-    
-    if not match:
-        advertencias.append("❌ Fecha u hora no detectada")
-        return None, None, advertencias
-    
-    dia, mes_str, anio, hora = match.groups()
-    
-    mes_limpio = mes_str.lower().strip('.')
-    mes_num = MESES.get(mes_limpio)
-    
-    if not mes_num:
-        advertencias.append(f"❌ Mes no reconocido: {mes_str}")
-        return None, None, advertencias
-    try:
-        fecha_obj = datetime(int(anio), mes_num, int(dia))
-        hoy = datetime.now()
-        
-        if fecha_obj > hoy:
-            advertencias.append("⚠️ Fecha es futura")
-        diferencia_dias = (hoy - fecha_obj).days
-        if diferencia_dias > 365:
-            advertencias.append("⚠️ Fecha muy antigua (más de 1 año)")
-        
-        fecha_formateada = f"{dia} {mes_str} {anio}"
-        return fecha_formateada, hora.strip(), advertencias
-        
-    except ValueError:
-        advertencias.append("❌ Fecha inválida (no existe en el calendario)")
-        return None, None, advertencias
-
-def extraer_destinatario(texto: str, lineas: List) -> Tuple[Optional[str], Optional[str], List[str]]:
-    advertencias = []
-    nombre = None
-    numero = None
-    
+    # 2. Extraer receptor (línea después de "Enviado a:")
     match_nombre = re.search(
-        r'(?:Enviado a:|Recibido de:)\s*\n?\s*([A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ\s\.]{2,50})',
+        r'Enviado a:\s*[\r\n]+\s*([A-ZÁÉÍÓÚÑ][A-Za-záéíóúñ\s\.]+)',
         texto,
         re.IGNORECASE
     )
     
     if match_nombre:
         nombre_raw = match_nombre.group(1).strip()
-        nombre = re.sub(r'\s+', ' ', nombre_raw)
-    match_numero = re.search(r'(\d{3})\s*(\d{3})\s*(\d{3})', texto)
-    if match_numero:
-        numero = f"{match_numero.group(1)} {match_numero.group(2)} {match_numero.group(3)}"
+        # Limpiar múltiples espacios y saltos de línea
+        nombre_raw = nombre_raw.split('\n')[0].strip()
+        resultado["receptor"] = re.sub(r'\s+', ' ', nombre_raw)
+    else:
+        advertencias.append("❌ Nombre del receptor no detectado")
     
-    if not nombre:
-        advertencias.append("❌ Nombre del destinatario no detectado")
+    # 3. Extraer teléfono (formato: XXX XXX XXX)
+    match_telefono = re.search(r'(\d{3})\s+(\d{3})\s+(\d{3})', texto)
     
-    if not numero:
+    if match_telefono:
+        resultado["telefono"] = f"{match_telefono.group(1)} {match_telefono.group(2)} {match_telefono.group(3)}"
+    else:
         advertencias.append("⚠️ Número de teléfono no detectado")
     
-    return nombre, numero, advertencias
-
-def extraer_destino(lineas: List) -> Tuple[Optional[str], List[str]]:
-    advertencias = []
-    destino = None
-    destino_y = None
-    destino_x = None
+    # 4. Extraer fecha y hora (formato: 01 Oct 2025 10:51 PM)
+    match_fecha = re.search(
+        r'(\d{1,2})\s+([A-Za-záéíóúñÑ]{3,10})\.?\s+(\d{4})\s+(\d{1,2}:\d{2})\s+([APap][Mm])',
+        texto
+    )
     
-    for linea in lineas:
-        for palabra in linea.get('Words', []):
+    if match_fecha:
+        dia, mes_str, anio, hora, ampm = match_fecha.groups()
+        resultado["fecha"] = f"{dia} {mes_str} {anio}"
+        resultado["hora"] = f"{hora} {ampm.upper()}"
+        
+        # Validar fecha
+        meses = {
+            'ene': 1, 'enero': 1, 'jan': 1,
+            'feb': 2, 'febrero': 2,
+            'mar': 3, 'marzo': 3,
+            'abr': 4, 'abril': 4, 'apr': 4,
+            'may': 5, 'mayo': 5,
+            'jun': 6, 'junio': 6,
+            'jul': 7, 'julio': 7,
+            'ago': 8, 'agosto': 8, 'aug': 8,
+            'sep': 9, 'sept': 9, 'septiembre': 9,
+            'oct': 10, 'octubre': 10,
+            'nov': 11, 'noviembre': 11,
+            'dic': 12, 'diciembre': 12, 'dec': 12
+        }
+        
+        mes_limpio = mes_str.lower().strip('.')
+        mes_num = meses.get(mes_limpio)
+        
+        if mes_num:
             try:
-                texto = palabra['WordText']
-                if 'destino' in texto.lower():
-                    destino_y = palabra['Top'] + palabra['Height'] // 2
-                    destino_x = palabra['Left'] + palabra['Width']
-                    break
-            except (KeyError, TypeError):
-                continue
+                fecha_obj = datetime(int(anio), mes_num, int(dia))
+                hoy = datetime.now()
+                
+                if fecha_obj > hoy:
+                    advertencias.append("⚠️ Fecha es futura")
+                
+                diferencia_dias = (hoy - fecha_obj).days
+                if diferencia_dias > 365:
+                    advertencias.append("⚠️ Fecha muy antigua (más de 1 año)")
+            except ValueError:
+                advertencias.append("❌ Fecha inválida (no existe en el calendario)")
+        else:
+            advertencias.append(f"❌ Mes no reconocido: {mes_str}")
+    else:
+        advertencias.append("❌ Fecha u hora no detectada")
     
-    if destino_y and destino_x:
-        margen = 50
-        posibles_destinos = []
+    # 5. Extraer destino del texto directamente
+    destino = extraer_destino_texto(texto)
+    
+    if destino:
+        resultado["destino"] = destino
+    else:
+        advertencias.append("⚠️ Destino no detectado")
+    
+    # 6. Comisión (formato: GRATIS o S/ X.XX)
+    match_comision = re.search(
+        r'Comisi[oó]n:\s*[\r\n]+\s*([A-Z]+|[sS]/\s*\d+(?:[.,]\d{2})?)', 
+        texto, 
+        re.IGNORECASE
+    )
+    
+    if match_comision:
+        comision_text = match_comision.group(1).strip().upper()
+        resultado["comision"] = comision_text
+    else:
+        advertencias.append("⚠️ Comisión no detectada")
+    
+    # 7. Código de operación (8 dígitos)
+    match_codigo = re.search(
+        r'(?:C[oó]digo de operaci[oó]n:|operaci[eé]n:)\s*[\r\n]+\s*(\d{8})', 
+        texto, 
+        re.IGNORECASE
+    )
+    
+    if match_codigo:
+        resultado["codigo_operacion"] = match_codigo.group(1)
+    else:
+        # Fallback: buscar cualquier secuencia de 8 dígitos
+        match_codigo_fallback = re.search(r'\b(\d{8})\b', texto)
+        if match_codigo_fallback:
+            resultado["codigo_operacion"] = match_codigo_fallback.group(1)
+        else:
+            advertencias.append("❌ Código de operación no detectado")
+    
+    # 8. Extraer comentario (línea después de la fecha, si existe)
+    if resultado["fecha"]:
+        lineas = texto.split('\n')
+        campos_sistema = [
+            'código', 'codigo', 'operación', 'operacion',
+            'destino', 'comisión', 'comision', 'gratis', 'interbank', 'plin'
+        ]
         
-        for linea in lineas:
-            for palabra in linea.get('Words', []):
-                try:
-                    left = palabra['Left']
-                    top = palabra['Top']
-                    texto = palabra['WordText'].strip()
-                    if (abs(top - destino_y) <= margen or top > destino_y) and left >= destino_x - 10:
-                        if texto in DESTINOS_VALIDOS:
-                            posibles_destinos.append(texto)
-                        elif texto.lower() in [d.lower() for d in DESTINOS_VALIDOS]:
-                            for dest in DESTINOS_VALIDOS:
-                                if dest.lower() == texto.lower():
-                                    posibles_destinos.append(dest)
-                                    break
-                except (KeyError, TypeError):
-                    continue
-        
-        if posibles_destinos:
-            destino = posibles_destinos[0]
-    
-    if not destino:
-        advertencias.append("❌ Destino no detectado")
-    
-    return destino, advertencias
-
-def extraer_codigo_operacion(texto: str) -> Tuple[Optional[str], List[str]]:
-    advertencias = []
-    match = re.search(r'\b(\d{8})\b', texto)
-    
-    if match:
-        return match.group(1), advertencias
-    
-    advertencias.append("❌ Código de operación no detectado")
-    return None, advertencias
-
-def extraer_comentario(texto: str, fecha_str: Optional[str]) -> Optional[str]:
-    if not fecha_str:
-        return None
-    
-    lineas = texto.splitlines()
-    campos_sistema = [
-        'nro. de operación', 'código de operación', 'destino', 
-        'datos de la transacción', 'plin', 'comisión', 'gratis',
-        'fecha y hora', 'interbank'
-    ]
-    
-    for i, linea in enumerate(lineas):
-        if any(parte in linea for parte in fecha_str.split()):
-            if i + 1 < len(lineas):
-                posible_comentario = lineas[i + 1].strip()
-                if posible_comentario and len(posible_comentario) > 3:
-                    es_campo_sistema = any(
-                        campo in posible_comentario.lower() 
-                        for campo in campos_sistema
-                    )
+        for i, linea in enumerate(lineas):
+            # Buscar línea que contiene la fecha
+            if any(parte in linea for parte in resultado["fecha"].split()):
+                if i + 1 < len(lineas):
+                    posible_comentario = lineas[i + 1].strip()
                     
-                    if not es_campo_sistema:
-                        return posible_comentario
+                    # Verificar que no sea un campo del sistema
+                    if posible_comentario and len(posible_comentario) > 3:
+                        es_campo_sistema = any(
+                            campo in posible_comentario.lower() 
+                            for campo in campos_sistema
+                        )
+                        
+                        if not es_campo_sistema:
+                            resultado["comentario"] = posible_comentario
+                break
     
-    return None
-
-def validar_comprobante_plin(
-    texto: str,
-    lineas: List,
-    tipo_estructura: int
-) -> Dict:
-    resultado = {
-        "tipo_transaccion": "Envío" if tipo_estructura == 1 else "Recepción",
-        "monto": None,
-        "destinatario": None,
-        "telefono": None,
-        "fecha": None,
-        "hora": None,
-        "codigo_operacion": None,
-        "destino": None,
-        "comentario": None,
-        "es_valido": True,
-        "advertencias": []
-    }
-    
-    todas_advertencias = []
-    
-    monto, adv_monto = extraer_monto(texto)
-    resultado["monto"] = monto
-    todas_advertencias.extend(adv_monto)
-    
-    fecha, hora, adv_fecha = extraer_fecha_hora(texto)
-    resultado["fecha"] = fecha
-    resultado["hora"] = hora
-    todas_advertencias.extend(adv_fecha)
-    
-    nombre, telefono, adv_dest = extraer_destinatario(texto, lineas)
-    resultado["destinatario"] = nombre
-    resultado["telefono"] = telefono
-    todas_advertencias.extend(adv_dest)
-    
-    destino, adv_destino = extraer_destino(lineas)
-    resultado["destino"] = destino
-    todas_advertencias.extend(adv_destino)
-    
-    codigo, adv_codigo = extraer_codigo_operacion(texto)
-    resultado["codigo_operacion"] = codigo
-    todas_advertencias.extend(adv_codigo)
-
-    comentario = extraer_comentario(texto, fecha)
-    resultado["comentario"] = comentario
-    campos_criticos = [
-        resultado["monto"],
-        resultado["fecha"],
-        resultado["codigo_operacion"],
-        resultado["destinatario"]
-    ]
-    
-    if not all(campos_criticos):
-        resultado["es_valido"] = False
-    advertencias_criticas = [
-        adv for adv in todas_advertencias if adv.startswith("❌")
-    ]
-    
-    if advertencias_criticas:
-        resultado["es_valido"] = False
-    
-    resultado["advertencias"] = todas_advertencias if todas_advertencias else ["✅ Sin observaciones"]
+    if advertencias:
+        resultado["advertencias"] = advertencias
+    else:
+        resultado["advertencias"] = ["✅ Sin observaciones"]
     
     return resultado
 
 @router.post("/filtro_ocr")
-async def filtro_ocr(file: UploadFile = File(...)):
+async def filtro_ocr_plin(file: UploadFile = File(...)):
+    """
+    Endpoint para validar comprobantes Plin mediante OCR
+    """
     if not file.content_type or not file.content_type.startswith('image/'):
         raise HTTPException(
-            status_code=422,
+            status_code=422, 
             detail="❌ El archivo debe ser una imagen válida"
         )
     
@@ -392,6 +333,7 @@ async def filtro_ocr(file: UploadFile = File(...)):
                 detail="❌ El archivo está vacío"
             )
         
+        # Decodificar imagen
         np_arr = np.frombuffer(content, np.uint8)
         imagen = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
         
@@ -400,15 +342,23 @@ async def filtro_ocr(file: UploadFile = File(...)):
                 status_code=422,
                 detail="❌ No se pudo decodificar la imagen"
             )
+        
+        # Redimensionar si es muy grande
         if imagen.shape[0] > 2000 or imagen.shape[1] > 2000:
             factor = min(2000 / imagen.shape[0], 2000 / imagen.shape[1])
             imagen = cv2.resize(imagen, (0, 0), fx=factor, fy=factor)
+        
+        # Recortar cuadro blanco
         recorte = recortar_cuadro_blanco_np(imagen)
         
         if recorte is None:
             recorte = imagen
+        
+        # Convertir a bytes para OCR
         _, buffer = cv2.imencode(".png", recorte)
         img_bytes = buffer.tobytes()
+        
+        # Enviar a OCR
         texto, lineas_overlay = enviar_imagen_ocr_bytes(
             ('comprobante.png', img_bytes, 'image/png')
         )
@@ -418,15 +368,21 @@ async def filtro_ocr(file: UploadFile = File(...)):
                 status_code=422,
                 detail="❌ No se pudo extraer texto del comprobante"
             )
+        
+        # Detectar tipo de estructura
         tipo = detectar_estructura(texto)
         
         if tipo == 0:
             raise HTTPException(
                 status_code=422,
                 detail="❌ No se reconoce como un comprobante Plin válido. "
-                       "Verifica que la imagen sea clara y esté completa."
+                       "Verifica que la imagen sea clara y contenga '¡Pago exitoso!' o 'Enviado a:'"
             )
-        resultado = validar_comprobante_plin(texto, lineas_overlay, tipo)
+        
+        # Validar estructura
+        resultado = validar_estructura_plin(texto)
+        
+        # Agregar texto completo para debug
         resultado["texto_ocr"] = texto
         
         return resultado
