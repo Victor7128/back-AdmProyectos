@@ -237,7 +237,7 @@ def validar_comprobante(parsed_results, imagen):
 # --- Endpoint POST ---
 @router.post("/validarplin")
 async def filtro_ocr(file: UploadFile = File(...)):
-    if not file.content_type.startswith("image/"):
+    if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=422, detail="El archivo debe ser una imagen")
     imagen_bytes = await file.read()
     if not imagen_bytes:
