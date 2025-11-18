@@ -17,9 +17,9 @@ def porcentaje_nitidez(image_path, max_var=400):
     return porcentaje
 
 def clasificar_autenticidad(porcentaje):
-    if porcentaje < 70:
+    if porcentaje < 50:
         return "Alterado"
-    elif porcentaje < 90:
+    elif porcentaje < 70:
         return "Sospechoso"
     else:
         return "Auténtico"
@@ -82,4 +82,4 @@ async def filtro_ruido(file: UploadFile = File(...)):
             try:
                 os.unlink(tmp_path)
             except Exception:
-                pass 
+                pass
